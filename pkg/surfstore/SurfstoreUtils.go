@@ -1,7 +1,6 @@
 package surfstore
 
 import (
-	"fmt"
 	"io/ioutil"
 	"log"
 	"math"
@@ -78,10 +77,7 @@ func ClientSync(client RPCClient) {
 				log.Printf("Received error while reading file %v", err)
 			}
 			num_of_blocks := int(math.Ceil(float64(len(data)) / float64(block_size)))
-			fmt.Println(filename)
-			fmt.Println("Num of blocks")
-			fmt.Println(num_of_blocks)
-			hash_list := make([]string, num_of_blocks)
+			hash_list := []string{}
 			for i := 0; i < num_of_blocks; i++ {
 				end := int(math.Min(float64((i+1)*block_size), float64(len(data))))
 				block := data[i*block_size : end]
@@ -126,7 +122,6 @@ func ClientSync(client RPCClient) {
 		local_meta, ok := local_filemetas_towrite[filename]
 		if !ok || local_meta.Version < remote_meta.Version {
 			// Download files
-			fmt.Println("DOWNLOADING")
 			hash_list := remote_meta.BlockHashList
 			bytes_to_write := []byte{}
 			// Get blocks via rpc call
@@ -154,7 +149,6 @@ func ClientSync(client RPCClient) {
 		remote_meta, ok := remote_index[filename]
 		// If doesn't exist or if there are changes that need to be synced
 		if !ok || local_meta.Version > remote_meta.Version {
-			fmt.Println("UPLOADING TO BLOCKSTORE")
 			full_path := ConcatPath(base_dir, filename)
 			data, err := ioutil.ReadFile(full_path)
 			if err != nil {
@@ -162,14 +156,13 @@ func ClientSync(client RPCClient) {
 			}
 			num_of_blocks := int(math.Ceil(float64(len(data)) / float64(block_size)))
 			//Get blocks and map them to hash strings from file's local meta
-			hash_to_block := make(map[string]Block)
+			hash_to_block := make(map[string]*Block)
 			for i := 0; i < num_of_blocks; i++ {
 				hash_string := local_meta.BlockHashList[i]
 				end := int(math.Min(float64((i+1)*block_size), float64(len(data))))
 				block := data[i*block_size : end]
-				hash_to_block[hash_string] = Block{BlockData: block, BlockSize: int32(len(block))}
+				hash_to_block[hash_string] = &Block{BlockData: block, BlockSize: int32(len(block))}
 			}
-
 			//Get hashes for file that are in blockstore
 			block_hashes_in_bs := []string{}
 			err = client.HasBlocks(local_meta.BlockHashList, block_store_addr.Addr, &block_hashes_in_bs)
@@ -182,14 +175,13 @@ func ClientSync(client RPCClient) {
 			for hash_string, block_data := range hash_to_block {
 				if !StringInArray(hash_string, block_hashes_in_bs) {
 					success := &Success{Flag: false}
-					err = client.PutBlock(&block_data, block_store_addr.Addr, &success.Flag)
+					err = client.PutBlock(block_data, block_store_addr.Addr, &success.Flag)
 					if err != nil {
 						log.Printf("Received error putting block %v ", err)
 					}
 					overall_success = overall_success && success.Flag
 				}
 			}
-			fmt.Println(overall_success)
 			// Update remote index
 			if overall_success {
 				var server_version int32
@@ -197,7 +189,6 @@ func ClientSync(client RPCClient) {
 				if err != nil {
 					log.Printf("Received err updating remote index %v", err)
 				}
-				fmt.Println(server_version)
 				// Conflict, need to download server version
 				if server_version == -1 {
 					err = client.GetFileInfoMap(&remote_index)
