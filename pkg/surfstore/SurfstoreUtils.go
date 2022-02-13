@@ -2,7 +2,6 @@ package surfstore
 
 import (
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"math"
@@ -142,6 +141,10 @@ func UploadFile(client RPCClient, filename string, local_meta *FileMetaData,
 	}
 }
 
+func UploadDeleted() {
+
+}
+
 // Implement the logic for a client syncing with the server here.
 func ClientSync(client RPCClient) {
 	base_dir := client.BaseDir
@@ -222,7 +225,7 @@ func ClientSync(client RPCClient) {
 	files_deleted := []string{}
 	for filename, _ := range local_index {
 		path := ConcatPath(base_dir, filename)
-		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) && !Equal(local_index[filename].BlockHashList, []string{"0"}) {
 			files_deleted = append(files_deleted, filename)
 		}
 	}
@@ -241,8 +244,12 @@ func ClientSync(client RPCClient) {
 			if local_meta.Version < remote_meta.Version {
 				files_to_download = append(files_to_download, filename)
 				in_arr, idx := StringInArray(filename, files_to_upload)
+				in_delete, idx2 := StringInArray(filename, files_deleted)
 				if in_arr {
 					files_to_upload = remove(files_to_upload, idx)
+				}
+				if in_delete {
+					files_deleted = remove(files_deleted, idx2)
 				}
 			}
 		} else {
@@ -251,7 +258,6 @@ func ClientSync(client RPCClient) {
 	}
 
 	//Download needed files
-	fmt.Println(files_to_download)
 	for _, filename := range files_to_download {
 		new_meta, err := DownloadFile(client, filename, remote_index[filename], base_dir, block_store_addr.Addr)
 		if err != nil {
@@ -259,10 +265,17 @@ func ClientSync(client RPCClient) {
 		} else {
 			local_filemetas_towrite[filename] = &new_meta
 		}
+		flag := Equal(new_meta.BlockHashList, []string{"0"})
+		if flag {
+			path := ConcatPath(base_dir, filename)
+			err := os.Remove(path)
+			if err != nil {
+				log.Printf("Received error while deleting file %v", err)
+			}
+		}
 	}
 
 	//Upload needed files
-	fmt.Println(files_to_upload)
 	for _, filename := range files_to_upload {
 		new_meta, err := UploadFile(client, filename, local_index[filename], base_dir, block_store_addr.Addr, block_size)
 		if err != nil {
@@ -272,53 +285,52 @@ func ClientSync(client RPCClient) {
 		}
 	}
 
-	// Look for files to upload
-	// for filename, local_meta := range local_filemetas_towrite {
-	// 	remote_meta, ok := remote_index[filename]
-	// 	// If doesn't exist or if there are changes that need to be synced
-	// 	if !ok || local_meta.Version > remote_meta.Version {
-	// 		full_path := ConcatPath(base_dir, filename)
-	// 		// If file needs to be deleted on metastore
-	// 		if Equal(local_meta.BlockHashList, []string{"0"}) {
-	// 			//Update File
-	// 			var server_version int32
-	// 			err := client.UpdateFile(local_meta, &server_version)
-	// 			if err != nil {
-	// 				log.Printf("Received err updating remote index %v", err)
-	// 			}
-	// 			// Conflict, need to download server version
-	// 			if server_version == -1 {
-	// 				err = client.GetFileInfoMap(&remote_index)
-	// 				if err != nil {
-	// 					log.Printf("Received error in GetFileInfoMap %v", err)
-	// 				}
-	// 				remote_meta = remote_index[filename]
-	// 				hash_list := remote_meta.BlockHashList
-	// 				bytes_to_write := []byte{}
-	// 				// Get blocks via rpc call
-	// 				for _, hash_string := range hash_list {
-	// 					block := &Block{}
-	// 					err := client.GetBlock(hash_string, block_store_addr.Addr, block)
-	// 					if err != nil {
-	// 						log.Printf("Received error getting block %v", err)
-	// 					}
-	// 					bytes_to_write = append(bytes_to_write, block.BlockData...)
-	// 				}
-	// 				// Write out file in base_dir
-	// 				local_filemetas_towrite[filename] = remote_meta
-	// 				path := ConcatPath(base_dir, filename)
-	// 				err := ioutil.WriteFile(path, bytes_to_write, 0644)
-	// 				if err != nil {
-	// 					log.Printf("Received error writing file locally %v", err)
-	// 				}
-	// 			} else {
-	// 				os.Remove(full_path)
-	// 			}
-	// 			continue
-	// 		}
+	//Upload deleted files
+	for _, filename := range files_deleted {
+		remote_meta := remote_index[filename]
+		local_meta := local_index[filename]
+		full_path := ConcatPath(base_dir, filename)
+		new_meta := FileMetaData{Filename: filename, Version: local_meta.Version + 1, BlockHashList: []string{"0"}}
+		var server_version int32
+		if new_meta.Version > remote_index[filename].Version {
+			err := client.UpdateFile(&new_meta, &server_version)
+			if err != nil {
+				log.Printf("Received err updating remote index %v", err)
+			}
+		} else {
+			server_version = -1
+		}
+		// Conflict, need to download server version
+		if server_version == -1 {
+			err = client.GetFileInfoMap(&remote_index)
+			if err != nil {
+				log.Printf("Received error in GetFileInfoMap %v", err)
+			}
+			remote_meta = remote_index[filename]
+			hash_list := remote_meta.BlockHashList
+			bytes_to_write := []byte{}
+			// Get blocks via rpc call
+			for _, hash_string := range hash_list {
+				block := &Block{}
+				err := client.GetBlock(hash_string, block_store_addr.Addr, block)
+				if err != nil {
+					log.Printf("Received error getting block %v", err)
+				}
+				bytes_to_write = append(bytes_to_write, block.BlockData...)
+			}
+			// Write out file in base_dir
+			new_meta = *remote_meta
+			path := ConcatPath(base_dir, filename)
+			err := ioutil.WriteFile(path, bytes_to_write, 0644)
+			if err != nil {
+				log.Printf("Received error writing file locally %v", err)
+			}
+		} else {
+			os.Remove(full_path)
+		}
+		local_filemetas_towrite[filename] = &new_meta
+	}
 
-	// 	}
-	// }
 	err = WriteMetaFile(local_filemetas_towrite, base_dir)
 	if err != nil {
 		log.Printf("Received error writing local index %v", err)
