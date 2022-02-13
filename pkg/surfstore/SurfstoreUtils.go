@@ -2,6 +2,7 @@ package surfstore
 
 import (
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"math"
@@ -107,6 +108,7 @@ func UploadFile(client RPCClient, filename string, local_meta *FileMetaData,
 		if err != nil {
 			log.Printf("Received err updating remote index %v", err)
 		}
+		fmt.Println(server_version)
 		// Conflict, need to download server version
 		if server_version == -1 {
 			remote_index := make(map[string]*FileMetaData)

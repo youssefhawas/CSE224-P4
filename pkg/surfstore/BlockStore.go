@@ -13,9 +13,12 @@ type BlockStore struct {
 }
 
 func (bs *BlockStore) GetBlock(ctx context.Context, blockHash *BlockHash) (*Block, error) {
+	bs.blockmap_lock.Lock()
 	if data, ok := bs.BlockMap[blockHash.Hash]; ok {
+		bs.blockmap_lock.Unlock()
 		return data, nil
 	} else {
+		bs.blockmap_lock.Unlock()
 		return nil, fmt.Errorf("Block does not exist in blockmap")
 	}
 }
@@ -34,7 +37,9 @@ func (bs *BlockStore) PutBlock(ctx context.Context, block *Block) (*Success, err
 func (bs *BlockStore) HasBlocks(ctx context.Context, blockHashesIn *BlockHashes) (*BlockHashes, error) {
 	block_hashes := []string{}
 	for _, blockhash := range blockHashesIn.Hashes {
+		bs.blockmap_lock.Lock()
 		_, ok := bs.BlockMap[blockhash]
+		bs.blockmap_lock.Unlock()
 		if ok {
 			block_hashes = append(block_hashes, blockhash)
 		}
