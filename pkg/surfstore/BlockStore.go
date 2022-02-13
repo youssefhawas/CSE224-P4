@@ -35,7 +35,6 @@ func (bs *BlockStore) HasBlocks(ctx context.Context, blockHashesIn *BlockHashes)
 			block_hashes = append(block_hashes, blockhash)
 		}
 	}
-	fmt.Println(block_hashes)
 	return &BlockHashes{Hashes: block_hashes}, nil
 }
 
