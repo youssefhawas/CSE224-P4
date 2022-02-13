@@ -3,10 +3,12 @@ package surfstore
 import (
 	context "context"
 	"fmt"
+	"sync"
 )
 
 type BlockStore struct {
-	BlockMap map[string]*Block
+	blockmap_lock sync.Mutex
+	BlockMap      map[string]*Block
 	UnimplementedBlockStoreServer
 }
 
@@ -20,7 +22,9 @@ func (bs *BlockStore) GetBlock(ctx context.Context, blockHash *BlockHash) (*Bloc
 
 func (bs *BlockStore) PutBlock(ctx context.Context, block *Block) (*Success, error) {
 	hashString := GetBlockHashString(block.BlockData)
+	bs.blockmap_lock.Lock()
 	bs.BlockMap[hashString] = block
+	bs.blockmap_lock.Unlock()
 	// WHEN WILL SUCCESS BE FALSE
 	return &Success{Flag: true}, nil
 }
